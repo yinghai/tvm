@@ -205,6 +205,16 @@ class NormalizePlanarYUV(Caffe2OpConverter):
         return _sym.broadcast_div(_sym.broadcast_sub(inputs[0], mean), std)
 
 
+class ExpandDims(Caffe2OpConverter):
+    """ Operator converter for ExpandDims"""
+    @classmethod
+    def _impl(cls, inputs, args, params):
+        output = inputs[0]
+        for dim in args["dims"]:
+            output = _sym.expand_dims(output, axis=dim, num_newaxis=1)
+        return output
+
+
 class ResizeNearest(Caffe2OpConverter):
     """ Operator converter for Upsample (nearest mode).
     """
@@ -226,6 +236,22 @@ class FC(Caffe2OpConverter):
     @classmethod
     def _impl(cls, inputs, args, params):
         inputs[0] = _sym.flatten(inputs[0])
+        args['units'] = infer_channels(inputs[1], params)
+        return AttrCvt(
+            'dense',
+            ignores=['axis', 'axis_w'],
+            extras={'use_bias': len(inputs) == 3},
+        )(inputs, args, params)
+
+class FCTransposed(Caffe2OpConverter):
+    """ Operator converter for FC.
+    """
+
+    @classmethod
+    def _impl(cls, inputs, args, params):
+        inputs[0] = _sym.flatten(inputs[0])
+        assert len(inputs[1].shape) == 2
+        inputs[1] = _sym.transpose(inputs[1], axes=(1, 0))
         args['units'] = infer_channels(inputs[1], params)
         return AttrCvt(
             'dense',
@@ -264,6 +290,7 @@ def _get_convert_map():
         'Add': onnx.Add.get_converter(opset=1),
         'Sum': onnx.Sum.get_converter(opset=1),
         'Softmax': onnx.Softmax.get_converter(opset=1),
+        'Reshape': onnx.Reshape.get_converter(opset=1),
 
         # nn
         'AveragePool': AveragePool.get_converter(),
@@ -271,6 +298,7 @@ def _get_convert_map():
         'Conv': Conv.get_converter(),
         'Concat': Concat.get_converter(),
         'FC': FC.get_converter(),
+
         'SpatialBN': SpatialBN.get_converter(),
         'ResizeNearest': ResizeNearest.get_converter(),
         'Relu': AttrCvt('relu', {}, ignores=['order']),
@@ -279,6 +307,12 @@ def _get_convert_map():
 
         # c2 image preprocessing ops
         'NormalizePlanarYUV': NormalizePlanarYUV.get_converter(),
+
+        # c2 ranking
+        'ExpandDims': ExpandDims.get_converter(),
+        'EnsureCPUOutput': Renamer('copy'),
+        'Flatten': Renamer('flatten'),
+        'FCTransposed': FCTransposed.get_converter(),
     }
 
 
