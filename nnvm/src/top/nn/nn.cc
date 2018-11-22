@@ -118,6 +118,39 @@ If ``use_bias`` is set to be false, then the ``bias`` term is ignored.
 })
 .set_support_level(1);
 
+// Batch MatMul
+DMLC_REGISTER_PARAMETER(BatchMatMulParam);
+
+inline bool BatchMatMulInferShape(const nnvm::NodeAttrs& attrs,
+    std::vector<TShape>* in_shape,
+    std::vector<TShape>* out_shape) {
+  CHECK_EQ(in_shape->size(), 2);
+  CHECK_EQ(out_shape->size(), 1);
+  TShape shape_a = (*in_shape)[0];
+  TShape shape_b = (*in_shape)[1];
+  CHECK_EQ(shape_a.ndim(), 3);
+  CHECK_EQ(shape_b.ndim(), 3);
+  CHECK_EQ(shape_a[0], shape_b[0]);
+  TShape oshape = shape_a;
+  oshape[2] = shape_b[2];
+  NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
+  return true;
+}
+
+NNVM_REGISTER_OP(batch_matmul)
+    .describe(R"code(Does Batch MatMul on the two inputs.
+)code" NNVM_ADD_FILELINE)
+    .add_argument("a", "3D Tensor", "Input a.")
+    .add_argument("b", "3D Tensor", "Input b.")
+    .add_arguments(BatchMatMulParam::__FIELDS__())
+    .set_attr_parser(ParamParser<BatchMatMulParam>)
+    .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<BatchMatMulParam>)
+    .set_attr<FInferShape>("FInferShape", BatchMatMulInferShape)
+    .set_attr<FInferType>("FInferType", ElemwiseType<0, 1>)
+    .set_num_inputs(2)
+    .set_num_outputs(1)
+    .set_support_level(1);
+
 // relu
 NNVM_REGISTER_ELEMWISE_UNARY_OP(relu)
 .describe(R"code(Computes rectified linear.

@@ -32,6 +32,10 @@ struct DenseParam : public dmlc::Parameter<DenseParam> {
   static const constexpr int kBias = 2;
 };
 
+struct BatchMatMulParam : public dmlc::Parameter<BatchMatMulParam> {
+  DMLC_DECLARE_PARAMETER(BatchMatMulParam){};
+};
+
 struct DropoutParam : public dmlc::Parameter<DropoutParam> {
   float rate;
 
