@@ -124,23 +124,28 @@ DMLC_REGISTER_PARAMETER(BatchMatMulParam);
 inline bool BatchMatMulInferShape(const nnvm::NodeAttrs& attrs,
     std::vector<TShape>* in_shape,
     std::vector<TShape>* out_shape) {
+  const BatchMatMulParam& param = nnvm::get<BatchMatMulParam>(attrs.parsed);
   CHECK_EQ(in_shape->size(), 2);
   CHECK_EQ(out_shape->size(), 1);
   TShape shape_a = (*in_shape)[0];
   TShape shape_b = (*in_shape)[1];
   CHECK_EQ(shape_a.ndim(), shape_b.ndim());
   CHECK_GE(shape_a.ndim(), 3);
+  size_t ndim = shape_a.ndim();
   size_t batch_a = 1;
-  for (int i = 0; i < shape_a.ndim() - 2; ++i) {
+  for (size_t i = 0; i < ndim - 2UL; ++i) {
     batch_a *= shape_a[i];
   }
   size_t batch_b = 1;
-  for (int i = 0; i < shape_b.ndim() - 2; ++i) {
+  for (size_t i = 0; i < ndim - 2UL; ++i) {
     batch_b *= shape_b[i];
   }
   CHECK_EQ(batch_a, batch_b);
   TShape oshape = shape_a;
-  oshape[shape_a.ndim() - 1] = shape_b[shape_a.ndim() - 1];
+  if (param.trans_a) {
+    oshape[ndim - 2] = shape_a[ndim - 1];
+  }
+  oshape[ndim - 1] = param.trans_b ? shape_b[ndim - 2] : shape_b[ndim - 1];
   NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
   return true;
 }
