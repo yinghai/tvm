@@ -128,20 +128,34 @@ inline bool BatchMatMulInferShape(const nnvm::NodeAttrs& attrs,
   CHECK_EQ(out_shape->size(), 1);
   TShape shape_a = (*in_shape)[0];
   TShape shape_b = (*in_shape)[1];
-  CHECK_EQ(shape_a.ndim(), 3);
-  CHECK_EQ(shape_b.ndim(), 3);
-  CHECK_EQ(shape_a[0], shape_b[0]);
+  CHECK_EQ(shape_a.ndim(), shape_b.ndim());
+  CHECK_GE(shape_a.ndim(), 3);
+  size_t batch_a = 1;
+  for (int i = 0; i < shape_a.ndim() - 2; ++i) {
+    batch_a *= shape_a[i];
+  }
+  size_t batch_b = 1;
+  for (int i = 0; i < shape_b.ndim() - 2; ++i) {
+    batch_b *= shape_b[i];
+  }
+  CHECK_EQ(batch_a, batch_b);
   TShape oshape = shape_a;
-  oshape[2] = shape_b[2];
+  oshape[shape_a.ndim() - 1] = shape_b[shape_a.ndim() - 1];
   NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
   return true;
 }
 
 NNVM_REGISTER_OP(batch_matmul)
     .describe(R"code(Does Batch MatMul on the two inputs.
+
+- **A**: `(b1, b2, ..., bn, N, K)`
+- **B**: `(b1, b2, ..., bn, K, M)`
+- **out**: `(b1, b2, ..., bn, N, M)`
+
+where out[..., :, :] = A[..., :, :] * B [..., :, :]
 )code" NNVM_ADD_FILELINE)
-    .add_argument("a", "3D Tensor", "Input a.")
-    .add_argument("b", "3D Tensor", "Input b.")
+    .add_argument("A", "nD Tensor", "Input a.")
+    .add_argument("B", "nD Tensor", "Input b.")
     .add_arguments(BatchMatMulParam::__FIELDS__())
     .set_attr_parser(ParamParser<BatchMatMulParam>)
     .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<BatchMatMulParam>)

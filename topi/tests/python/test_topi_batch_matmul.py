@@ -8,21 +8,27 @@ from tvm.contrib.pickle_memoize import memoize
 
 from common import get_all_backend
 
-def verify_batch_matmul(batch, N, K, M):
-    A = tvm.placeholder((batch, N, K), name='A')
-    B = tvm.placeholder((batch, K, M), name='B')
-    C = tvm.placeholder((batch, N, M), name='C')
+def verify_batch_matmul(ashape, bshape):
+    A = tvm.placeholder(ashape, name='A')
+    B = tvm.placeholder(bshape, name='B')
+    batch = np.prod(ashape[0:-2])
+    N = ashape[-2]
+    K = ashape[-1]
+    M = bshape[-1]
+    C = tvm.placeholder(ashape[0:-2] + [N, M], name='C')
     dtype = A.dtype
 
     # use memoize to pickle the test data for next time use
-    @memoize("topi.tests.test_topi_batch_matmul")
+    #@memoize("topi.tests.test_topi_batch_matmul")
     def get_ref_data():
-        a_np = np.random.uniform(size=(batch, N, K)).astype(dtype)
-        b_np = np.random.uniform(size=(batch, K, M)).astype(dtype)
+        a_np = np.random.uniform(size=ashape).astype(dtype)
+        b_np = np.random.uniform(size=bshape).astype(dtype)
         c_np = np.random.uniform(size=(batch, N, M)).astype(dtype)
+        a_np_reshape = np.reshape(a_np, (batch, N, K))
+        b_np_reshape = np.reshape(b_np, (batch, K, M))
         for i in range(batch):
-            c_np[i, :, :] = np.matmul(a_np[i, :, :], b_np[i, :, :])
-        return (a_np, b_np, c_np)
+            c_np[i, :, :] = np.matmul(a_np_reshape[i, :, :], b_np_reshape[i, :, :])
+        return (a_np, b_np, np.reshape(c_np, ashape[0:-2] + [N, M]))
     # get the test data
     a_np, b_np, c_np = get_ref_data()
 
@@ -46,7 +52,8 @@ def verify_batch_matmul(batch, N, K, M):
         check_device(device)
 
 def test_batch_matmul():
-    verify_batch_matmul(4, 1024, 1000, 256)
+    verify_batch_matmul([4, 1024, 1000], [4, 1000, 256])
+    verify_batch_matmul([2, 3, 1024, 1000], [2, 3, 1000, 256])
 
 if __name__ == "__main__":
     test_batch_matmul()
