@@ -259,6 +259,17 @@ class FCTransposed(Caffe2OpConverter):
             extras={'use_bias': len(inputs) == 3},
         )(inputs, args, params)
 
+class DotProduct(Caffe2OpConverter):
+    """ Operator converter for DotProduct
+    """
+
+    @classmethod
+    def _impl(cls, inputs, args, params):
+        inputs[0] = _sym.reshape(inputs[0], (0, 1, -1))
+        inputs[1] = _sym.reshape(inputs[1], (0, -1, 1))
+        dot = _sym.batch_matmul(inputs[0], inputs[1])
+        return _sym.reshape(dot, (-1))
+
 
 class SpatialBN(Caffe2OpConverter):
     """ Operator converter for SpatialBN.
@@ -313,6 +324,8 @@ def _get_convert_map():
         'EnsureCPUOutput': Renamer('copy'),
         'Flatten': Renamer('flatten'),
         'FCTransposed': FCTransposed.get_converter(),
+        'BatchMatMul': AttrCvt('batch_matmul', ignores=['broadcast']),
+        'DotProduct': DotProduct.get_converter(),
     }
 
 
