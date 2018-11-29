@@ -49,7 +49,7 @@ inline int ColumnCount(DLTensor* tensor, bool trans) {
 }
 
 // Call a column major blas.  Note that data is stored in tvm as row
-// major, so this we switch the arguments.
+// major, so this we switch the arguments. AB = (B^T A^T)^T
 template<typename TGemmOp>
 inline void CallGemm(TVMArgs args, TVMRetValue *ret, TGemmOp op) {
   DLTensor* A = args[0];
@@ -95,7 +95,107 @@ inline void CallGemm(TVMArgs args, TVMRetValue *ret, TGemmOp op) {
      ColumnStride(C));
 }
 
-}  // namespace contrib
+inline int ColumnStride3D(DLTensor* tensor) {
+  // If the tensor itself is transposed then it will have strides
+  // backward from what we expect.  Regardless, the max of the strides
+  // (the other stride is 1) is the column stride.
+  if (tensor->strides) {
+    return std::max(tensor->strides[1], tensor->strides[2]);
+  } else {
+    return tensor->shape[2];
+  }
+}
+
+
+inline int ElementStride3D(DLTensor* tensor) {
+  if (tensor->strides) {
+    return std::min(tensor->strides[1], tensor->strides[2]);
+  } else {
+    return 1;
+  }
+}
+
+
+// Reversed strides indicates an in-place transpose operation.
+inline bool IsInPlaceTransposed3D(DLTensor* tensor) {
+  return tensor->strides && (tensor->strides[2] > tensor->strides[1]);
+}
+
+inline int BatchCount3D(DLTensor *tensor) { return tensor->shape[0]; }
+
+inline int RowCount3D(DLTensor* tensor, bool trans) {
+  return tensor->shape[trans ? 2 : 1];
+}
+
+
+inline int ColumnCount3D(DLTensor* tensor, bool trans) {
+  return tensor->shape[trans ? 1 : 2];
+}
+
+
+template<typename TBatchGemmOp>
+inline void CallBatchGemm(TVMArgs args, TVMRetValue *ret, TBatchGemmOp op) {
+  using DType = typename TBatchGemmOp::TDatatype;
+  DLTensor* A = args[0];
+  DLTensor* B = args[1];
+  DLTensor* C = args[2];
+  bool transa = args[3];
+  bool transb = args[4];
+  int bit_depth = sizeof(DType) * 8;
+  CHECK_EQ(A->ndim, 3);
+  CHECK_EQ(B->ndim, 3);
+  CHECK_EQ(C->ndim, 3);
+
+  int batch_size = BatchCount3D(A);
+  CHECK_EQ(BatchCount3D(B), batch_size);
+  CHECK_EQ(ElementStride(A), 1);
+  CHECK_EQ(ElementStride(B), 1);
+  CHECK_EQ(ElementStride(C), 1);
+
+  // C can never be transposed.
+  CHECK(!IsInPlaceTransposed3D(C));
+
+  // Reversed strides indicates an in-place transpose operation.
+  transa = IsInPlaceTransposed3D(A) ? !transa : transa;
+  transb = IsInPlaceTransposed3D(B) ? !transb : transb;
+
+  CHECK(TypeMatch(B->dtype, kDLFloat, bit_depth));
+  CHECK(TypeMatch(C->dtype, kDLFloat, bit_depth));
+  double alpha = args.size() > 5 ? args[5] : 1.0;
+  double beta = args.size() > 6 ? args[6] : 0.0;
+  const int A_size = A->shape[1] * A->shape[2];
+  const int B_size = B->shape[1] * B->shape[2];
+  const int C_size = C->shape[1] * C->shape[2];
+  DType* A_data =
+     reinterpret_cast<typename TBatchGemmOp::TDatatype *>(
+         static_cast<char *>(A->data) + A->byte_offset);
+  DType* B_data =
+     reinterpret_cast<typename TBatchGemmOp::TDatatype *>(
+         static_cast<char *>(B->data) + B->byte_offset);
+  DType* C_data =
+     reinterpret_cast<typename TBatchGemmOp::TDatatype *>(
+         static_cast<char *>(C->data) + C->byte_offset);
+
+  op(batch_size,
+     transb,
+     transa,
+     ColumnCount3D(B, transb),
+     RowCount3D(A, transa),
+     ColumnCount3D(A, transa),
+     static_cast<float>(alpha),
+     B_data,
+     B_size,
+     ColumnStride3D(B),
+     A_data,
+     A_size,
+     ColumnStride3D(A),
+     static_cast<float>(beta),
+     C_data,
+     C_size,
+     ColumnStride3D(C));
+}
+
+} // namespace contrib
 }  // namespace tvm
 
 #endif  // TVM_CONTRIB_CBLAS_GEMM_COMMON_H_
