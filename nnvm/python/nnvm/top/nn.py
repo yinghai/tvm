@@ -73,6 +73,20 @@ def schedule_dense(_, outs, target):
 
 reg.register_pattern("dense", OpPattern.OUT_ELEMWISE_FUSABLE)
 
+# batch_matmul
+@reg.register_compute("batch_matmul")
+def compute_batch_matmul(attrs, inputs, _):
+    """Compute definition of batch_matmul"""
+    return topi.nn.batch_matmul(inputs[0], inputs[1], inputs[2], inputs[3])
+
+@reg.register_schedule("batch_matmul")
+def schedule_batch_matmul(_, outs, target):
+    """Schedule definition of batch_matmul"""
+    with tvm.target.create(target):
+        return topi.generic.schedule_batch_matmul(outs)
+
+reg.register_pattern("batch_matmul", OpPattern.OUT_ELEMWISE_FUSABLE)
+
 #matmul
 reg.register_pattern("matmul", OpPattern.OUT_ELEMWISE_FUSABLE)
 reg.register_schedule("matmul", _fschedule_injective)

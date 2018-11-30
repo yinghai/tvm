@@ -44,7 +44,7 @@ def verify_batch_matmul(ashape, bshape, trans_a=False, trans_b=False):
         print("Running on target: %s" % device)
         with tvm.target.create(device):
             C = topi.nn.batch_matmul(A, B, trans_a, trans_b)
-            s = topi.generic.schedule_dense(C)
+            s = topi.generic.schedule_batch_matmul(C)
         a = tvm.nd.array(a_np, ctx)
         b = tvm.nd.array(b_np, ctx)
         c = tvm.nd.array(np.zeros(get_const_tuple(C.shape), dtype=dtype), ctx)

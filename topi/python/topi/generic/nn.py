@@ -298,6 +298,22 @@ def schedule_dense(outs):
     """
     return _default_schedule(outs, False)
 
+@tvm.target.override_native_generic_func("schedule_batch_matmul")
+def schedule_batch_matmul(outs):
+    """Schedule for batch_matmul
+
+    Parameters
+    ----------
+    outs: Array of Tensor
+          The computation graph description of batch_matmul
+          in the format of an array of tensors.
+
+    Returns
+    -------
+    sch: Schedule
+        The computation schedule for the op.
+    """
+    return _default_schedule(outs, False)
 
 @tvm.target.override_native_generic_func("schedule_pool")
 def schedule_pool(outs, layout):
