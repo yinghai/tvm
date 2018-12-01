@@ -41,7 +41,8 @@ def batch_matmul_default(A, B, trans_a, trans_b):
     K = A.shape[-2] if trans_a else A.shape[-1]
     M = B.shape[-2] if trans_b else B.shape[-1]
     oshape = A.shape[:-2] + [N, M]
-    if A.shape > 3:
+    ndim = len(A.shape)
+    if ndim > 3:
         batch_a = product(A.shape[:-2])
         batch_b = product(B.shape[:-2])
         A = topi.reshape(A, [batch_a] + A.shape[-2:])
@@ -55,7 +56,7 @@ def batch_matmul_default(A, B, trans_a, trans_b):
     bmm = tvm.compute((batch_a, N, M),
                       lambda b, y, x: tvm.sum(A[b, y, k] * B[b, k, x], axis=k),
                       tag='batch_matmul')
-    return topi.reshape(bmm, oshape)
+    return topi.reshape(bmm, oshape) if ndim > 3 else bmm
 
 @tvm.target.override_native_generic_func("batch_matmul")
 def batch_matmul(A, B, trans_a=False, trans_b=False):
