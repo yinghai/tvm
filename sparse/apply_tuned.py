@@ -69,7 +69,7 @@ def run(
         remote.upload(lib_fname)
         rlib = remote.load_module('net.tar')
         ctx = remote.cpu(0)
-        module = graph_runtime.create(graph, rlib, ctx)
+        module = debug_runtime.create(graph, rlib, ctx)
     else:
         ctx = tvm.context(str(target), 0)
         if layerwise:
@@ -79,10 +79,13 @@ def run(
 
     logging.debug(graph.symbol().debug_str())
     module.set_input(**inputs)
-    if device == "skl":
-        module.zero_input(**new_params)
-    else:
-        module.set_input(**new_params)
+    module.zero_input(**new_params)
+    for k, v in sorted(new_params.items()):
+        print(k, v.shape)
+    # if device == "skl":
+    #     module.zero_input(**new_params)
+    # else:
+    #     module.set_input(**new_params)
     module.run()
     ftimer = module.module.time_evaluator("run", ctx, num_iter)
     for i in range(num_cycles):

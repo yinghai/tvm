@@ -26,12 +26,15 @@ class GraphRuntimeDebug : public GraphRuntime {
    */
   double DebugRun(size_t index) {
     CHECK(index < op_execs().size());
-    TVMContext ctx = data_entry()[GetEntryId(index, 0)].operator->()->ctx;
+    // TVMContext ctx = data_entry()[GetEntryId(index, 0)].operator->()->ctx;
+    if (op_execs()[index]) {
+      op_execs()[index]();
+    }
     auto tbegin = std::chrono::high_resolution_clock::now();
     if (op_execs()[index]) {
       op_execs()[index]();
     }
-    TVMSynchronize(ctx.device_type, ctx.device_id, nullptr);
+    // TVMSynchronize(ctx.device_type, ctx.device_id, nullptr);
     auto tend = std::chrono::high_resolution_clock::now();
     double time = std::chrono::duration_cast<std::chrono::duration<double> >(
         tend - tbegin).count();

@@ -63,7 +63,7 @@ def run(
         remote.upload(lib_fname)
         rlib = remote.load_module('net.tar')
         ctx = remote.cpu(0)
-        module = graph_runtime.create(graph, rlib, ctx)
+        module = debug_runtime.create(graph, rlib, ctx)
     else:
         ctx = tvm.context(str(target), 0)
         if layerwise:

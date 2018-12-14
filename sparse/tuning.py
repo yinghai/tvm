@@ -127,7 +127,12 @@ def run(symbol,
     tune_tasks(
         tasks,
         measure_option=autotvm.measure_option(
-            builder=autotvm.LocalBuilder(timeout=50),
+            builder=autotvm.LocalBuilder(
+                timeout=50,
+            ) if device == "skl" else autotvm.LocalBuilder(
+                timeout=50,
+                n_parallel=1
+            ),
             runner=autotvm.RPCRunner(
                 'skl', 'localhost', tracker_port,
                 number=autotvm_number,

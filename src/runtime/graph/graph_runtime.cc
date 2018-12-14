@@ -24,13 +24,13 @@ namespace runtime {
 void GraphRuntime::Run() {
   // setup the array and requirements.
   using namespace std::chrono;
-  // auto start = high_resolution_clock::now();
+  auto start = high_resolution_clock::now();
   for (size_t i = 0; i < op_execs_.size(); ++i) {
     if (op_execs_[i]) op_execs_[i]();
   }
-  // auto end = high_resolution_clock::now();
-  // LOG(INFO) << "Runtime us: "
-  //           << duration_cast<nanoseconds>(end - start).count() / 1.0e3;
+  auto end = high_resolution_clock::now();
+  LOG(INFO) << "Runtime us: "
+            << duration_cast<nanoseconds>(end - start).count() / 1.0e3;
 }
 
 /*!
