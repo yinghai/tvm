@@ -40,6 +40,7 @@ def compute_batch_matmul(attrs, inputs, _):
     """Compute definition of dense"""
     return topi.nn.batch_matmul(
         inputs[0], inputs[1],
+        layout=attrs.get_string("layout"),
         trans_a=attrs.get_bool("trans_a"),
         trans_b=attrs.get_bool("trans_b"))
 
@@ -48,6 +49,10 @@ def schedule_batch_matmul(_, outs, target):
     """Schedule definition of dense"""
     with tvm.target.create(target):
         return topi.generic.schedule_batch_matmul(outs)
+
+@reg.register_alter_op_layout("batch_matmul")
+def alter_batch_matmul_layout(attrs, inputs, tinfos):
+    return topi.nn.batch_matmul_alter_layout(attrs, inputs, tinfos)
 
 reg.register_pattern("batch_matmul", OpPattern.OUT_ELEMWISE_FUSABLE)
 

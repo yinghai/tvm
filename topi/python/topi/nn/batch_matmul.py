@@ -57,8 +57,24 @@ def batch_matmul_default(A, B, trans_a, trans_b):
                       tag='batch_matmul')
     return topi.reshape(bmm, oshape) if bmm.shape != oshape else bmm
 
+@tvm.target.generic_func
+def batch_matmul_alter_layout(attrs, inputs, tinfos):
+    """Change Batch Matmul layout.
+
+    Parameters
+    ----------
+    attrs : nnvm.top.AttrDict
+        Attributes of current convolution
+    inputs : nnvm.symbol
+        Grouped input symbols
+    tinfos : list
+        Input shape and dtype
+    """
+    # not to change by default
+    return None
+
 @tvm.target.override_native_generic_func("batch_matmul")
-def batch_matmul(A, B, trans_a=False, trans_b=False):
+def batch_matmul(A, B, layout='NC', trans_a=False, trans_b=False):
     """Applies batched matmul.
 
     Parameters
@@ -68,6 +84,9 @@ def batch_matmul(A, B, trans_a=False, trans_b=False):
 
     B: tvm.Tensor
         n-D with shape [b0, ... bn, K, M]
+
+    layout: tring
+        Input/output layout
 
     trans_a: bool
         Whether transpose A[-2:] or not
@@ -80,4 +99,7 @@ def batch_matmul(A, B, trans_a=False, trans_b=False):
     output: tvm.Tensor
         n-D with shape [[b0, ... bn, N, M]
     """
-    return batch_matmul_default(A, B, trans_a, trans_b)
+    if layout == 'NC':
+        return batch_matmul_default(A, B, trans_a, trans_b)
+    else:
+        raise ValueError("not support this layout {} yet".format(layout))

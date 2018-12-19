@@ -3,6 +3,7 @@ from tvm import autotvm
 from .. import generic, nn, tag
 from ..util import traverse_inline, get_const_tuple
 from ..sparse import sparse_lengths_sum_fused_8_bit_rowwise
+import topi
 
 from tvm.contrib import cblas
 
@@ -45,8 +46,8 @@ def product(l):
         p *= i
     return p
 
-@autotvm.register_topi_compute(nn.batch_matmul, 'cpu', ['direct'])
-def batch_matmul(cfg, A, B, trans_a=False, trans_b=False):
+@autotvm.register_topi_compute(nn.batch_matmul, 'cpu', ['ncn'])
+def batch_matmul(cfg, A, B, layout, trans_a=False, trans_b=False):
     """The default implementation of dense in topi.
 
     Parameters
@@ -57,9 +58,77 @@ def batch_matmul(cfg, A, B, trans_a=False, trans_b=False):
     weight : tvm.Tensor
         2-D with shape [out_dim, in_dim]
 
+    layout: string
+        Input/output layout
+
     bias : tvm.Tensor, optional
         1-D with shape [out_dim]
 
+    Returns
+    -------
+    output : tvm.Tensor
+        2-D with shape [batch, out_dim]
+    """
+    return _batch_matmul_ncn(cfg, A, B, trans_a, trans_b, cfg['n_minor'].val)
+
+def _batch_matmul_ncn(cfg, A, B, trans_a, trans_b, n):
+    """Implementation for batch_matmul with NCn layout
+    TODO: we probably just want to fix the shape to 4D
+
+    Parameters
+    ----------
+    A: tvm.Tensor
+        n-D with shape [b0, ..., bn, N, K, n] where the batch size should be
+        batch = b0 * .. * bn * n
+
+    B: tvm.Tensor
+        n-D with shape [b0, ..., bn, K, M, n] with the same batch size
+
+    trans_a: bool
+        Whether transpose A[-2:] or not
+
+    trans_b: bool
+        Whether transpose B[-2:] or not
+
+    Returns
+    -------
+    output: tvm.Tensor
+        n-D with shape [[b0, ... bn, N, M, n] with the same batch size
+    """
+    assert len(A.shape) == len(B.shape), \
+        "Shape mismatch between inputs"
+    cfg.define_knob('n_minor', [0, 8, 16])
+    batch_a = A.shape[0]
+    batch_b = B.shape[0]
+    N = A.shape[-2] if trans_a else A.shape[-3]
+    K = A.shape[-3] if trans_a else A.shape[-2]
+    M = B.shape[-3] if trans_b else B.shape[-2]
+    oshape = A.shape[:-3] + [N, M, n]
+    if A.shape > 4:
+        batch_a = product(A.shape[:-3])
+        batch_b = product(B.shape[:-3])
+        A = topi.reshape(A, [batch_a] + A.shape[-3:])
+        B = topi.reshape(B, [batch_b] + B.shape[-3:])
+    if trans_a:
+        A = topi.transpose(A, [0, 2, 1, 3])
+    if trans_b:
+        B = topi.transpose(B, [0, 2, 1, 3])
+
+    k = tvm.reduce_axis((0, K), name='k')
+    bmm = tvm.compute((batch_a, N, M, n), lambda b, x, y, p: tvm.sum(A[b, x, k, p] * B[b, k, y, p], axis=k), tag='batch_matmul_ncn')
+    return topi.reshape(bmm, oshape) if bmm.shape != oshape else bmm
+
+@autotvm.register_topi_compute(nn.batch_matmul, 'cpu', ['direct'])
+def batch_matmul(cfg, A, B, layout='NC', trans_a=False, trans_b=False):
+    """The default implementation of dense in topi.
+    Parameters
+    ----------
+    data : tvm.Tensor
+        2-D with shape [batch, in_dim]
+    weight : tvm.Tensor
+        2-D with shape [out_dim, in_dim]
+    bias : tvm.Tensor, optional
+        1-D with shape [out_dim]
     Returns
     -------
     output : tvm.Tensor
@@ -87,7 +156,6 @@ def batch_matmul(cfg, A, B, trans_a=False, trans_b=False):
     if len(A.shape) > 3:
         return topi.reshape(C, oshape)
     return C
-
 
 def batch_matmul_direct(cfg, A, B, trans_a, trans_b):
     """The default implementation of batched_matmul in topi.
@@ -133,8 +201,8 @@ def batch_matmul_blas(cfg, A, B, trans_a, trans_b):
     return cblas.batch_matmul(
         A, B, transa=trans_a, transb=trans_b, iterative=iterative, tag="batch_matmul")
 
-@autotvm.register_topi_schedule(generic.schedule_batch_matmul, 'cpu', ['direct'])
-def schedule_dense(cfg, outs):
+@autotvm.register_topi_schedule(generic.schedule_batch_matmul, 'cpu', ['direct', 'ncn'])
+def schedule_batch_matmul(cfg, outs):
     """Schedule for dense operator.
 
     Parameters
@@ -154,10 +222,88 @@ def schedule_dense(cfg, outs):
     s = tvm.create_schedule([x.op for x in outs])
 
     def _callback(op):
-        pass
+        # schedule batch_matmul in NC{8,16}n layout
+        if 'batch_matmul_ncn' in op.tag:
+            C = op.output(0)
+            A, B = op.input_tensors
+            PB, N, K, P = A.shape
+            _, _, M, P = B.shape
+
+            ab, ax, ay, ap = s[C].op.axis
+
+            ##### define space begin #####
+            cfg.define_knob('split_x', [1, 2, 3, 4, 8, 16, 32, 64])
+            cfg.define_knob('split_y', [1, 2, 3, 4, 8, 16, 32, 64])
+            cfg.define_knob('split_k', [1, 4, 8, 16, 32, 64])
+            cfg.define_knob('unroll_threshold', [4, 8, 16, 32])
+            cfg.define_knob('ordering', [0, 1])
+            ##### define space end #####
+
+            # schedule according to config
+            xo, xi = s[C].split(ax, factor=cfg['split_x'].val)
+            yo, yi = s[C].split(ay, factor=cfg['split_y'].val)
+            ko, ki = s[C].split(k, factor=cfg['split_k'].val)
+
+            if cfg['ordering'].val:
+                s[C].reorder(ab, xo, yo, ko, xi, ki, yi, ap)
+            else:
+                s[C].reorder(ab, xo, ko, yo, xi, yi, ki, ap)
+
+            inner_loop_size_x = cfg['split_x'].val
+            inner_loop_size_y = cfg['split_y'].val
+            inner_loop_size_k = cfg['split_k'].val
+            th = cfg['unroll_threshold'].val
+
+            if PB <= th:
+                s[C].unroll(ab)
+            if N // inner_loop_size_x <= th:
+                s[C].unroll(xo)
+            if inner_loop_size_x <= th:
+                s[C].unroll(xi)
+            if M // inner_loop_size_y <= th:
+                s[C].unroll(yo)
+            if inner_loop_size_y <= th:
+                s[C].unroll(yi)
+            if K // inner_loop_size_k <= th:
+                s[C].unroll(ko)
+            if inner_loop_size_k <= th:
+                s[C].unroll(ki)
+
+            s[C].vectorize(ap)
+
     traverse_inline(s, outs[0].op, _callback)
     return s
 
+@nn.batch_matmul_alter_layout.register("cpu")
+def _batch_matmul_alter_layout(attrs, inputs, tinfo):
+    import nnvm.symbol as sym
+    copy_inputs = [s for s in inputs]
+    new_attrs = {k : attrs[k] for k in attrs.keys()}
+    dispatch_ctx = autotvm.task.DispatchContext.current
+    target = tvm.target.current_target()
+    # query schedule and fallback if necessary
+    workload = autotvm.task.args_to_workload(
+        tinfo + [attrs['layout'], attrs['trans_a'] + attrs['trans_b']],
+        nn.batch_matmul)
+    cfg = dispatch_ctx.query(target, workload)
+    if cfg.is_fallback:
+        return None
+
+    n_minor = cfg['n_minor'].val
+    if not n_minor:
+        return None
+    new_attrs['layout'] = 'NC%dn' % n_minor
+    Batch, M, K = tinfo[0].shape
+    _, _, N = tinfo[1].shape
+    new_a = tvm.placeholder((Batch // n_minor, M, K, n_minor), dtype=tinfo[0].dtype)
+    new_b = tvm.placeholder((Batch // n_minor, K, N, n_minor), dtype=tinfo[1].dtype)
+    new_workload = autotvm.task.args_to_workload(
+        [new_a, new_b, new_attrs['layout'], new_attrs['trans_a'], new_attrs['trans_b']],
+        nn.batch_matmul)
+    new_cfg = copy.deepcopy(cfg)
+    new_cfg.template_key = "ncn"
+    dispatch_ctx.update(target, new_workload, new_cfg)
+    return sym.batch_matmul(*copy_inputs, **new_attrs)
 
 def sls_fused_impl():
     src = """
@@ -255,3 +401,4 @@ def sparse_length_sum_fused_8_bit_rowwise_asm(data, indices, lengths):
         dtype="float32",
         name="sparse_length_sum")
     return sparse_length_sum
+

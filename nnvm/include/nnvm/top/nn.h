@@ -35,14 +35,19 @@ struct DenseParam : public dmlc::Parameter<DenseParam> {
 struct BatchMatMulParam : public dmlc::Parameter<BatchMatMulParam> {
   bool trans_a;
   bool trans_b;
+  std::string layout;
 
-  DMLC_DECLARE_PARAMETER(BatchMatMulParam){
-    DMLC_DECLARE_FIELD(trans_a).set_default(false)
-        .describe("If True, transpose innermost two dimensions of input A before matmul"
-                  "If False, do nothing.");
-    DMLC_DECLARE_FIELD(trans_b).set_default(false)
-        .describe("If True, transpose innermost two dimensions of input B before matmul"
-                  "If False, do nothing.");
+  DMLC_DECLARE_PARAMETER(BatchMatMulParam) {
+    DMLC_DECLARE_FIELD(trans_a).set_default(false).describe(
+        "If True, transpose innermost two dimensions of input A before matmul"
+        "If False, do nothing.");
+    DMLC_DECLARE_FIELD(trans_b).set_default(false).describe(
+        "If True, transpose innermost two dimensions of input B before matmul"
+        "If False, do nothing.");
+    DMLC_DECLARE_FIELD(layout).set_default("NC").describe(
+        "Dimension ordering of input data."
+        "Default ordering is 'NC' which means natural matrix ordering."
+        "More options can be NC8n or NC16n");
   };
 };
 
